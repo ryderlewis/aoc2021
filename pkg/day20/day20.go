@@ -26,14 +26,8 @@ func (r *Runner) Challenge1(input io.Reader) (string, error) {
 		return "", err
 	}
 
-	r.print()
-
 	for i := 0; i < 2; i++ {
-		r.enhance()
-
-		fmt.Println()
-		fmt.Printf("Enhanced %d:\n", i+1)
-		r.print()
+		r.enhance((i%2) & r.algo[0])
 	}
 
 	return strconv.Itoa(len(r.grid)), nil
@@ -44,24 +38,37 @@ func (r *Runner) Challenge2(input io.Reader) (string, error) {
 		return "", err
 	}
 
-	return strconv.Itoa(0), nil
+	for i := 0; i < 50; i++ {
+		r.enhance((i%2) & r.algo[0])
+	}
+
+	return strconv.Itoa(len(r.grid)), nil
 }
 
-func (r *Runner) enhance() {
+func (r *Runner) val(x, y, blink int) int {
+	// if the x or y value is "outside" the image, its value will be the "blink" value
+	if x < 0 || y < 0 || x >= r.width || y >= r.height {
+		return blink
+	}
+
+	return r.grid[Coordinate{x, y}]
+}
+
+func (r *Runner) enhance(blink int) {
 	grid := make(map[Coordinate]int)
 
 	for y := -1; y < r.height + 1; y++ {
 		for x := -1; x < r.width + 1; x++ {
 			// make an algo index from the grid
-			index := r.grid[Coordinate{x-1, y-1}] << 8 |
-				r.grid[Coordinate{x, y-1}] << 7 |
-				r.grid[Coordinate{x+1, y-1}] << 6 |
-				r.grid[Coordinate{x-1, y}] << 5 |
-				r.grid[Coordinate{x, y}] << 4 |
-				r.grid[Coordinate{x+1, y}] << 3 |
-				r.grid[Coordinate{x-1, y+1}] << 2 |
-				r.grid[Coordinate{x, y+1}] << 1 |
-				r.grid[Coordinate{x+1, y+1}]
+			index := r.val(x-1, y-1, blink) << 8 |
+				r.val(x, y-1, blink) << 7 |
+				r.val(x+1, y-1, blink) << 6 |
+				r.val(x-1, y, blink) << 5 |
+				r.val(x, y, blink) << 4 |
+				r.val(x+1, y, blink) << 3 |
+				r.val(x-1, y+1, blink) << 2 |
+				r.val(x, y+1, blink) << 1 |
+				r.val(x+1, y+1, blink) & 1
 
 			val := r.algo[index]
 			if val > 0 {
