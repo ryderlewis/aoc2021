@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/ryderlewis/aoc2021/pkg/challenge"
 	"io"
-	"math"
 	"sort"
 	"strconv"
 )
@@ -45,26 +44,46 @@ type Runner struct {
 	startingState State
 	amphipodData map[Amphipod]*AmphipodData
 	roomHallIndexes map[int]int
+	cache map[State]int
 }
 
 // leastEnergy tries a naive recursive implementation, given the current state,
 // find the minimum number of moves to get to a final state
-func (r *Runner) leastEnergy(s *State) int {
+func (r *Runner) leastEnergy(s *State, recur int) int {
+	/*
+	fmt.Printf("Calculating leastEnergy, recur=%d:\n", recur)
+	s.print()
+	fmt.Println()
+	 */
+
 	if r.isFinal(s) {
 		return 0
 	}
+	if val, ok := r.cache[*s]; ok {
+		return val
+	}
 
-	newState := *s // makes a copy of s
-	bestEnergy := math.MaxInt
+	var newState State
+	newState = *s // makes a copy of s
+	bestEnergy := -1
+
 	for i, _ := range s {
 		// find legal moves for amphipod a, at position i
 		for _, move := range r.validMoves(s, i) {
 			// swap values
 			newState[move.from], newState[move.to] = newState[move.to], newState[move.from]
+			/*
+			fmt.Printf("Valid move, recur=%d:\n", recur)
+			newState.print()
+			fmt.Println()
+			 */
 
-			energy := move.energy + r.leastEnergy(&newState)
-			if energy < bestEnergy {
-				bestEnergy = energy
+			x := r.leastEnergy(&newState, recur+1)
+			if x >= 0 {
+				energy := move.energy + x
+				if bestEnergy < 0 || energy < bestEnergy {
+					bestEnergy = energy
+				}
 			}
 
 			// swap back
@@ -72,6 +91,7 @@ func (r *Runner) leastEnergy(s *State) int {
 		}
 	}
 
+	r.cache[*s] = bestEnergy
 	return bestEnergy
 }
 
@@ -157,6 +177,8 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 			default:
 				homeIsGood = false
 			}
+		} else {
+			homeIsGood = false
 		}
 
 		if homeIsGood {
@@ -181,6 +203,7 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 				if i >= 15 {
 					steps += 1 // starting point is deep, need an extra step to get out
 				}
+				// fmt.Printf("HOME IS GOOD %d => %d!\n", i, homeDest)
 				return []*Move{
 					{
 						amphipod: a,
@@ -204,6 +227,7 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 			if i >= 15 {
 				steps += 1 // starting point is deep
 			}
+			// fmt.Printf("APPENDING MOVE LEFT %d(%d) => %d\n", i, roomHallIndex, j)
 			moves = append(moves, &Move{
 				amphipod: a,
 				from: i,
@@ -223,6 +247,7 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 			if i >= 15 {
 				steps += 1 // starting point is deep
 			}
+			// fmt.Printf("APPENDING MOVE RIGHT %d(%d) => %d\n", i, roomHallIndex, j)
 			moves = append(moves, &Move{
 				amphipod: a,
 				from: i,
@@ -248,7 +273,7 @@ func (r *Runner) Challenge1(input io.Reader) (string, error) {
 		return "", err
 	}
 
-	return strconv.Itoa(r.leastEnergy(&r.startingState)), nil
+	return strconv.Itoa(r.leastEnergy(&r.startingState, 0)), nil
 }
 
 func (r *Runner) Challenge2(input io.Reader) (string, error) {
@@ -284,6 +309,8 @@ func (r *Runner) readInput(input io.Reader) error {
 }
 
 func (r *Runner) initialize() {
+	r.cache = make(map[State]int)
+
 	r.amphipodData = map[Amphipod]*AmphipodData{
 		A: {
 			hallIndex: 2,
