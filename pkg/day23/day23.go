@@ -6,6 +6,7 @@ import (
 	"github.com/ryderlewis/aoc2021/pkg/challenge"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 )
 
@@ -43,6 +44,7 @@ type AmphipodData struct {
 type Runner struct {
 	startingState State
 	amphipodData map[Amphipod]*AmphipodData
+	roomHallIndexes map[int]int
 }
 
 // leastEnergy tries a naive recursive implementation, given the current state,
@@ -81,7 +83,6 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 	a := s[i]
 	data := r.amphipodData[s[i]]
 
-	var hallBlocked [11]bool
 	var moves []*Move
 
 	if 0 <= i && i <= 10 {
@@ -97,29 +98,142 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 		}
 
 		// see if there's a clear path from the current location to the destination index
-		move := r.move(s, data, i, dest)
-		if move != nil {
-			moves = append(moves, move)
+		hallIndexes := []int{i, r.roomHallIndexes[dest]}
+		sort.Ints(hallIndexes)
+		for j := hallIndexes[0]; j <= hallIndexes[1]; j++ {
+			if i == j {
+				continue
+			}
+			if s[j] != EMPTY {
+				return nil // path is blocked
+			}
 		}
-	} else if 11 <= i && i <= 14 {
-		// amphipod is in a room closest to the hall. see if it can move out of the room
-		b := s[i+4] // other amphipod in the same room
-		if a == b && data.destIndexes[0] == i {
-			// amphipod is in its final destination
+
+		steps := hallIndexes[1] - hallIndexes[0]
+		if dest >= 15 {
+			steps += 2
+		} else {
+			steps += 1
+		}
+		return []*Move{
+			{
+				amphipod: a,
+				from: i,
+				to: dest,
+				distance: steps,
+				energy: data.energy * steps,
+			},
+		}
+	} else {
+		// amphipod is in a room. first, see if it's already home.
+		if i == data.destIndexes[1] {
+			// amphipod is deep into its own room. it's home.
+			return nil
+		} else if i == data.destIndexes[0] && s[data.destIndexes[1]] == a {
+			// amphipod is next to another amphipod, they are both home
 			return nil
 		}
 
-		// amphipod can move to let out its partner, or go to its final home.
-		// Note that to do this, we need to see which way this amphipod should
-		// move so that it doesn't block any other amphipods in the hall from
-		// moving to their destination.
+		// next see if the amphipod is blocked from moving.
+		if i >= 15 && s[i-4] != EMPTY {
+			// blocked.
+			return nil
+		}
+
+		// amphipod is in a room, but it needs to move out for now
+		roomHallIndex := r.roomHallIndexes[i]
+		destHallIndex := data.hallIndex
+
+		// first of all, see if the amphipod can go straight to its final destination. this is
+		// the ideal case
+		homeIsGood := true
+		var homeDest int
+		if s[data.destIndexes[0]] == EMPTY {
+			switch s[data.destIndexes[1]] {
+			case a:
+				homeDest = data.destIndexes[0]
+			case EMPTY:
+				homeDest = data.destIndexes[1]
+			default:
+				homeIsGood = false
+			}
+		}
+
+		if homeIsGood {
+			// see if there is a clear path to home. If not, then home is not good
+			hallIndexes := []int{roomHallIndex, destHallIndex}
+			sort.Ints(hallIndexes)
+
+			for j := hallIndexes[0]; j <= hallIndexes[1]; j++ {
+				if s[j] != EMPTY {
+					homeIsGood = false
+					break
+				}
+			}
+
+			if homeIsGood {
+				// number of steps is all steps in the hall, plus either one or two steps
+				// to go into the room
+				steps := hallIndexes[1] - hallIndexes[0] + 1 + 1
+				if homeDest >= 15 {
+					steps += 1
+				}
+				if i >= 15 {
+					steps += 1 // starting point is deep, need an extra step to get out
+				}
+				return []*Move{
+					{
+						amphipod: a,
+						from: i,
+						to: homeDest,
+						distance: steps,
+						energy: data.energy * steps,
+					},
+				}
+			}
+		}
+
+		// home is not good. So now we need to figure out where in the hall this amphipod can go.
+		for j := roomHallIndex-1; j >= 0 && s[j] == EMPTY; j-- {
+			if j == 2 || j == 4 || j == 6 || j == 8 {
+				// can't stop outside a room
+				continue
+			}
+
+			steps := roomHallIndex - j + 1
+			if i >= 15 {
+				steps += 1 // starting point is deep
+			}
+			moves = append(moves, &Move{
+				amphipod: a,
+				from: i,
+				to: j,
+				distance: steps,
+				energy: data.energy * steps,
+			})
+		}
+
+		for j := roomHallIndex+1; j <= 10 && s[j] == EMPTY; j++ {
+			if j == 2 || j == 4 || j == 6 || j == 8 {
+				// can't stop outside a room
+				continue
+			}
+
+			steps := j - roomHallIndex + 1
+			if i >= 15 {
+				steps += 1 // starting point is deep
+			}
+			moves = append(moves, &Move{
+				amphipod: a,
+				from: i,
+				to: j,
+				distance: steps,
+				energy: data.energy * steps,
+			})
+		}
 	}
 
 	return moves
-}
-
-func (r *Runner) move(s *State, data *AmphipodData, from, to int) *Move {
-	return nil
 }
 
 func (r *Runner) isFinal(s *State) bool {
@@ -186,11 +300,22 @@ func (r *Runner) initialize() {
 			destIndexes: []int{13, 17},
 			energy: 100,
 		},
-		C: {
+		D: {
 			hallIndex: 8,
 			destIndexes: []int{14, 18},
 			energy: 1000,
 		},
+	}
+
+	r.roomHallIndexes = map[int]int{
+		11: 2,
+		12: 4,
+		13: 6,
+		14: 8,
+		15: 2,
+		16: 4,
+		17: 6,
+		18: 8,
 	}
 }
 
