@@ -21,13 +21,14 @@ func (a Amphipod) String() string {
 
 const (
 	EMPTY = Amphipod(0)
+	DIRT = Amphipod('#')
 	A = Amphipod('A')
 	B = Amphipod('B')
 	C = Amphipod('C')
 	D = Amphipod('D')
 )
 
-type State [19]Amphipod
+type State [27]Amphipod
 
 type Move struct {
 	amphipod Amphipod
@@ -45,14 +46,18 @@ type Runner struct {
 	amphipodData map[Amphipod]*AmphipodData
 	roomHallIndexes map[int]int
 	cache map[State]int
+	maxRecur int
 }
 
 // leastEnergy tries a naive recursive implementation, given the current state,
 // find the minimum number of moves to get to a final state
 func (r *Runner) leastEnergy(s *State, recur int) int {
+	if recur > r.maxRecur {
+		r.maxRecur = recur
+	}
 	/*
 	fmt.Printf("Calculating leastEnergy, recur=%d:\n", recur)
-	s.print()
+	r.print(s)
 	fmt.Println()
 	 */
 
@@ -74,7 +79,7 @@ func (r *Runner) leastEnergy(s *State, recur int) int {
 			newState[move.from], newState[move.to] = newState[move.to], newState[move.from]
 			/*
 			fmt.Printf("Valid move, recur=%d:\n", recur)
-			newState.print()
+			r.print(newState)
 			fmt.Println()
 			 */
 
@@ -96,7 +101,7 @@ func (r *Runner) leastEnergy(s *State, recur int) int {
 }
 
 func (r *Runner) validMoves(s *State, i int) []*Move {
-	if s[i] == EMPTY {
+	if s[i] == EMPTY || s[i] == DIRT {
 		return nil
 	}
 
@@ -107,14 +112,20 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 
 	if 0 <= i && i <= 10 {
 		// amphipod is in the hall. only legal moves are to go to its final destination
-		var dest int
-		if s[data.destIndexes[1]] == EMPTY && s[data.destIndexes[0]] == EMPTY {
-			dest = data.destIndexes[1]
-		} else if s[data.destIndexes[1]] == a && s[data.destIndexes[0]] == EMPTY {
-			dest = data.destIndexes[0]
-		} else {
-			// no legal move
-			return nil
+		var dest, destDepth int
+		for depth, d := range data.destIndexes {
+			switch s[d] {
+			case a:
+				// this is fine
+			case DIRT:
+				// this is fine
+			case EMPTY:
+				dest = d
+				destDepth = depth + 1
+			default:
+				// there is a conflict, cannot move to this destination now
+				return nil
+			}
 		}
 
 		// see if there's a clear path from the current location to the destination index
@@ -129,12 +140,7 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 			}
 		}
 
-		steps := hallIndexes[1] - hallIndexes[0]
-		if dest >= 15 {
-			steps += 2
-		} else {
-			steps += 1
-		}
+		steps := hallIndexes[1] - hallIndexes[0] + destDepth
 		return []*Move{
 			{
 				amphipod: a,
@@ -145,45 +151,58 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 			},
 		}
 	} else {
-		// amphipod is in a room. first, see if it's already home.
-		if i == data.destIndexes[1] {
-			// amphipod is deep into its own room. it's home.
-			return nil
-		} else if i == data.destIndexes[0] && s[data.destIndexes[1]] == a {
-			// amphipod is next to another amphipod, they are both home
-			return nil
+		// amphipod is in a room. first, see which room it's in.
+		currRoomHallIndex := r.roomHallIndexes[i]
+		destRoomHallIndex := data.hallIndex
+		alreadyHome := currRoomHallIndex == destRoomHallIndex
+
+		// if amphipod is in the right room, and there are no conflicts deeper in the room, then peace out.
+		if alreadyHome {
+			// see if there are any other amphipod types deeper in this room. If so, we need to move to let them out
+			conflict := false
+			for j := i+1; r.roomHallIndexes[j] == currRoomHallIndex; j++ {
+				if s[j] != a && s[j] != DIRT {
+					conflict = true
+					break
+				}
+			}
+			if !conflict {
+				return nil // no conflicting amphipods deeper in the room. this one can stay where it's at
+			}
 		}
 
-		// next see if the amphipod is blocked from moving.
-		if i >= 15 && s[i-4] != EMPTY {
-			// blocked.
-			return nil
+		// amphipod should leave the room. make sure it isn't blocked
+		sourceDepth := 1
+		for j := i-1; r.roomHallIndexes[j] == currRoomHallIndex; j-- {
+			if s[j] != EMPTY {
+				return nil // amphipod is blocked
+			}
+			sourceDepth++
 		}
 
 		// amphipod is in a room, but it needs to move out for now
-		roomHallIndex := r.roomHallIndexes[i]
-		destHallIndex := data.hallIndex
-
 		// first of all, see if the amphipod can go straight to its final destination. this is
 		// the ideal case
 		homeIsGood := true
-		var homeDest int
-		if s[data.destIndexes[0]] == EMPTY {
-			switch s[data.destIndexes[1]] {
-			case a:
-				homeDest = data.destIndexes[0]
+		var homeDest, destDepth int
+		for depth, d := range data.destIndexes {
+			switch s[d] {
 			case EMPTY:
-				homeDest = data.destIndexes[1]
+				homeDest = d
+				destDepth = depth + 1
+			case DIRT:
+				// this is fine
+			case a:
+				// this is fine
 			default:
+				// there is a conflict, cannot move to this destination now
 				homeIsGood = false
 			}
-		} else {
-			homeIsGood = false
 		}
 
 		if homeIsGood {
 			// see if there is a clear path to home. If not, then home is not good
-			hallIndexes := []int{roomHallIndex, destHallIndex}
+			hallIndexes := []int{currRoomHallIndex, destRoomHallIndex}
 			sort.Ints(hallIndexes)
 
 			for j := hallIndexes[0]; j <= hallIndexes[1]; j++ {
@@ -194,15 +213,9 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 			}
 
 			if homeIsGood {
-				// number of steps is all steps in the hall, plus either one or two steps
-				// to go into the room
-				steps := hallIndexes[1] - hallIndexes[0] + 1 + 1
-				if homeDest >= 15 {
-					steps += 1
-				}
-				if i >= 15 {
-					steps += 1 // starting point is deep, need an extra step to get out
-				}
+				// number of steps is all steps in the hall, plus destDepth steps into the room
+				steps := hallIndexes[1] - hallIndexes[0] + sourceDepth + destDepth
+
 				// fmt.Printf("HOME IS GOOD %d => %d!\n", i, homeDest)
 				return []*Move{
 					{
@@ -217,17 +230,14 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 		}
 
 		// home is not good. So now we need to figure out where in the hall this amphipod can go.
-		for j := roomHallIndex-1; j >= 0 && s[j] == EMPTY; j-- {
+		for j := currRoomHallIndex-1; j >= 0 && s[j] == EMPTY; j-- {
 			if j == 2 || j == 4 || j == 6 || j == 8 {
 				// can't stop outside a room
 				continue
 			}
 
-			steps := roomHallIndex - j + 1
-			if i >= 15 {
-				steps += 1 // starting point is deep
-			}
-			// fmt.Printf("APPENDING MOVE LEFT %d(%d) => %d\n", i, roomHallIndex, j)
+			steps := currRoomHallIndex - j + sourceDepth
+			// fmt.Printf("APPENDING MOVE LEFT %d(%d) => %d\n", i, currRoomHallIndex, j)
 			moves = append(moves, &Move{
 				amphipod: a,
 				from: i,
@@ -237,17 +247,14 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 			})
 		}
 
-		for j := roomHallIndex+1; j <= 10 && s[j] == EMPTY; j++ {
+		for j := currRoomHallIndex+1; j <= 10 && s[j] == EMPTY; j++ {
 			if j == 2 || j == 4 || j == 6 || j == 8 {
 				// can't stop outside a room
 				continue
 			}
 
-			steps := j - roomHallIndex + 1
-			if i >= 15 {
-				steps += 1 // starting point is deep
-			}
-			// fmt.Printf("APPENDING MOVE RIGHT %d(%d) => %d\n", i, roomHallIndex, j)
+			steps := j - currRoomHallIndex + sourceDepth
+			// fmt.Printf("APPENDING MOVE RIGHT %d(%d) => %d\n", i, currRoomHallIndex, j)
 			moves = append(moves, &Move{
 				amphipod: a,
 				from: i,
@@ -262,16 +269,23 @@ func (r *Runner) validMoves(s *State, i int) []*Move {
 }
 
 func (r *Runner) isFinal(s *State) bool {
-	return s[11] == A && s[15] == A &&
-		s[12] == B && s[16] == B &&
-		s[13] == C && s[17] == C &&
-		s[14] == D && s[18] == D
+	for a, d := range r.amphipodData {
+		for _, i := range d.destIndexes {
+			if a != s[i] && s[i] != DIRT {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 func (r *Runner) Challenge1(input io.Reader) (string, error) {
 	if err := r.readInput(input); err != nil {
 		return "", err
 	}
+
+	r.print(&r.startingState)
 
 	return strconv.Itoa(r.leastEnergy(&r.startingState, 0)), nil
 }
@@ -281,7 +295,25 @@ func (r *Runner) Challenge2(input io.Reader) (string, error) {
 		return "", err
 	}
 
-	return strconv.Itoa(0), nil
+	r.startingState[r.amphipodData[A].destIndexes[3]] = r.startingState[r.amphipodData[A].destIndexes[1]]
+	r.startingState[r.amphipodData[A].destIndexes[1]] = D
+	r.startingState[r.amphipodData[A].destIndexes[2]] = D
+
+	r.startingState[r.amphipodData[B].destIndexes[3]] = r.startingState[r.amphipodData[B].destIndexes[1]]
+	r.startingState[r.amphipodData[B].destIndexes[1]] = C
+	r.startingState[r.amphipodData[B].destIndexes[2]] = B
+
+	r.startingState[r.amphipodData[C].destIndexes[3]] = r.startingState[r.amphipodData[C].destIndexes[1]]
+	r.startingState[r.amphipodData[C].destIndexes[1]] = B
+	r.startingState[r.amphipodData[C].destIndexes[2]] = A
+
+	r.startingState[r.amphipodData[D].destIndexes[3]] = r.startingState[r.amphipodData[D].destIndexes[1]]
+	r.startingState[r.amphipodData[D].destIndexes[1]] = A
+	r.startingState[r.amphipodData[D].destIndexes[2]] = C
+
+	r.print(&r.startingState)
+
+	return strconv.Itoa(r.leastEnergy(&r.startingState, 0)), nil
 }
 
 func (r *Runner) readInput(input io.Reader) error {
@@ -294,16 +326,25 @@ func (r *Runner) readInput(input io.Reader) error {
 	scanner.Scan()
 	line := scanner.Text()
 	r.startingState[11] = Amphipod(line[3])
-	r.startingState[12] = Amphipod(line[5])
-	r.startingState[13] = Amphipod(line[7])
-	r.startingState[14] = Amphipod(line[9])
+	r.startingState[15] = Amphipod(line[5])
+	r.startingState[19] = Amphipod(line[7])
+	r.startingState[23] = Amphipod(line[9])
 
 	scanner.Scan()
 	line = scanner.Text()
-	r.startingState[15] = Amphipod(line[3])
+	r.startingState[12] = Amphipod(line[3])
 	r.startingState[16] = Amphipod(line[5])
-	r.startingState[17] = Amphipod(line[7])
-	r.startingState[18] = Amphipod(line[9])
+	r.startingState[20] = Amphipod(line[7])
+	r.startingState[24] = Amphipod(line[9])
+
+	r.startingState[13] = DIRT
+	r.startingState[14] = DIRT
+	r.startingState[17] = DIRT
+	r.startingState[18] = DIRT
+	r.startingState[21] = DIRT
+	r.startingState[22] = DIRT
+	r.startingState[25] = DIRT
+	r.startingState[26] = DIRT
 
 	return nil
 }
@@ -314,39 +355,35 @@ func (r *Runner) initialize() {
 	r.amphipodData = map[Amphipod]*AmphipodData{
 		A: {
 			hallIndex: 2,
-			destIndexes: []int{11, 15},
+			destIndexes: []int{11, 12, 13, 14},
 			energy: 1,
 		},
 		B: {
 			hallIndex: 4,
-			destIndexes: []int{12, 16},
+			destIndexes: []int{15, 16, 17, 18},
 			energy: 10,
 		},
 		C: {
 			hallIndex: 6,
-			destIndexes: []int{13, 17},
+			destIndexes: []int{19, 20, 21, 22},
 			energy: 100,
 		},
 		D: {
 			hallIndex: 8,
-			destIndexes: []int{14, 18},
+			destIndexes: []int{23, 24, 25, 26},
 			energy: 1000,
 		},
 	}
 
-	r.roomHallIndexes = map[int]int{
-		11: 2,
-		12: 4,
-		13: 6,
-		14: 8,
-		15: 2,
-		16: 4,
-		17: 6,
-		18: 8,
+	r.roomHallIndexes = make(map[int]int)
+	for _, data := range r.amphipodData {
+		for _, i := range data.destIndexes {
+			r.roomHallIndexes[i] = data.hallIndex
+		}
 	}
 }
 
-func (s State) print() {
+func (r *Runner) print(s *State) {
 	/*
 	   #############
 	   #...........#
@@ -361,17 +398,25 @@ func (s State) print() {
 	}
 	fmt.Println("#")
 
-	fmt.Print("###")
-	for _, a := range s[11:15] {
-		fmt.Printf("%s#", a)
-	}
-	fmt.Println("##")
+	for i := 0; i < len(r.amphipodData[A].destIndexes); i++ {
+		if i == 0 {
+			fmt.Print("###")
+		} else {
+			fmt.Print("  #")
+		}
 
-	fmt.Print("  #")
-	for _, a := range s[15:] {
-		fmt.Printf("%s#", a)
+		for _, a := range []Amphipod{A, B, C, D} {
+			data := r.amphipodData[a]
+			fmt.Printf("%s#", s[data.destIndexes[i]])
+		}
+
+		if i == 0 {
+			fmt.Println("##")
+		} else {
+			fmt.Println()
+		}
 	}
-	fmt.Println()
+
 	fmt.Println("  #########")
 }
 
