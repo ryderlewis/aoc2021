@@ -35,7 +35,7 @@ func (r *Runner) Challenge1(input io.Reader) (string, error) {
 		return "", err
 	}
 
-	steps := 0
+	steps := 1
 	for r.move() {
 		steps++
 	}
