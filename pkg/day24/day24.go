@@ -24,6 +24,14 @@ const (
 	Y = Var('y')
 	Z = Var('z')
 	LITERAL = Var(0)
+
+	// MINZTOCHECK in testing, negative z inputs never worked
+	MINZTOCHECK = 0
+
+	// MAXZTOCHECK in testing, 7915 was the largest value for z that produced any results based on my puzzle
+	// input. this value may be different for different inputs, so tweak this accordingly. Start with something
+	// much higher, like 1_000_000, for new puzzle inputs.
+	MAXZTOCHECK = 7915
 )
 
 var (
@@ -91,7 +99,7 @@ func (r *Runner) buildInstructionSets() []*InstructionSet {
 		}
 		nextTargetZVals = make(map[int]bool)
 
-		for z := 0; z <= 10_000; z++ {
+		for z := MINZTOCHECK; z <= MAXZTOCHECK; z++ {
 			for inp := 1; inp <= 9; inp++ {
 				if vals, err := r.run(instructionSet.instructions, inp, [3]int{0, 0, z}); err == nil {
 					if _, ok := instructionSet.targetZVals[vals[2]]; ok {
