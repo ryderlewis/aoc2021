@@ -53,8 +53,8 @@ type Runner struct {
 
 var _ challenge.DailyChallenge = &Runner{}
 
-// solve returns the lowest and highest possible solutions to the problem
-func (r *Runner) solve() (string, string) {
+// buildInstructionSets returns the lowest and highest possible solutions to the problem
+func (r *Runner) buildInstructionSets() []*InstructionSet {
 	// work instructions one input at a time
 	instructionSets := make([]*InstructionSet, 0)
 	startIndex := 0
@@ -78,6 +78,7 @@ func (r *Runner) solve() (string, string) {
 	// the desired output This informs us of which possible output z values from each
 	// step are acceptable towards building a solution.
 	var nextTargetZVals map[int]bool
+	maxTargetZ := 0
 	for i := len(instructionSets)-1; i >= 0; i-- {
 		instructionSet := instructionSets[i]
 
@@ -90,28 +91,36 @@ func (r *Runner) solve() (string, string) {
 		}
 		nextTargetZVals = make(map[int]bool)
 
-		for z := 0; z <= 1_000_000; z++ {
+		for z := 0; z <= 10_000; z++ {
 			for inp := 1; inp <= 9; inp++ {
 				if vals, err := r.run(instructionSet.instructions, inp, [3]int{0, 0, z}); err == nil {
 					if _, ok := instructionSet.targetZVals[vals[2]]; ok {
 						nextTargetZVals[z] = true
+						if z > maxTargetZ {
+							maxTargetZ = z
+						}
 					}
 				}
 			}
 		}
 	}
 
-	possibleSolutions := r.findSolutions(instructionSets, [3]int{})
-	fmt.Printf("possible solutions: %d\n", len(possibleSolutions))
-
-	return possibleSolutions[0], possibleSolutions[len(possibleSolutions)-1]
+	fmt.Printf("max target z: %d\n", maxTargetZ)
+	return instructionSets
 }
 
-func (r *Runner) findSolutions(instructionSets []*InstructionSet, vars[3]int) []string {
-	solutions := make([]string, 0)
+func (r *Runner) findFirstSolution(instructionSets []*InstructionSet, vars[3]int, highest bool) string {
 	inputsRemaining := len(instructionSets)-1
+	solution := ""
 
-	for inp := 1; inp <= 9; inp++ {
+	var firstInput, lastInput, delta int
+	if highest {
+		firstInput, lastInput, delta = 9, 0, -1
+	} else {
+		firstInput, lastInput, delta = 1, 10, 1
+	}
+
+	for inp := firstInput; inp != lastInput; inp += delta {
 		if vals, err := r.run(instructionSets[0].instructions, inp, vars); err == nil {
 			if _, ok := instructionSets[0].targetZVals[vals[2]]; !ok {
 				continue
@@ -119,17 +128,19 @@ func (r *Runner) findSolutions(instructionSets []*InstructionSet, vars[3]int) []
 
 			if inputsRemaining == 0 {
 				// last input
-				solutions = append(solutions, strconv.Itoa(inp))
+				solution = strconv.Itoa(inp)
+				break
 			} else {
 				// recursively solve
-				for _, recur := range r.findSolutions(instructionSets[1:], vals) {
-					solutions = append(solutions, strconv.Itoa(inp) + recur)
+				if recur := r.findFirstSolution(instructionSets[1:], vals, highest); recur != "" {
+					solution = strconv.Itoa(inp) + recur
+					break
 				}
 			}
 		}
 	}
 
-	return solutions
+	return solution
 }
 
 func (r *Runner) Challenge1(input io.Reader) (string, error) {
@@ -137,15 +148,18 @@ func (r *Runner) Challenge1(input io.Reader) (string, error) {
 		return "", err
 	}
 
-	p1, p2 := r.solve()
-
-	// now, run through instruction sets one at a time, caching possible outcomes
-	return fmt.Sprintf("%s - %s", p1, p2), nil
+	instructionSets := r.buildInstructionSets()
+	return r.findFirstSolution(instructionSets, [3]int{}, true), nil
 }
 
 func (r *Runner) Challenge2(input io.Reader) (string, error) {
 	// updated part 1 to return both solutions
-	return r.Challenge1(input)
+	if err := r.readInput(input); err != nil {
+		return "", err
+	}
+
+	instructionSets := r.buildInstructionSets()
+	return r.findFirstSolution(instructionSets, [3]int{}, false), nil
 }
 
 func (r *Runner) run(instructions []*Instruction, input int, v [3]int) ([3]int, error) {
